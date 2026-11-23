@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+*.log
+*.pid
+
+# 运行时生成的数据目录(不进仓库)
+comate_docs_kb/
+local_docs_kb/
+bot_memory_data/
+nfl_news_archive/
+auto_export_data/
+taobao_home_archive/
+sports_reports/
