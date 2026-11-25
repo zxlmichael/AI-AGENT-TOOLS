@@ -7,3 +7,7 @@ openai>=1
 
 # 可选:doc_kb 本地 embedding 模型(bge-small-zh-v1.5,从 HF 镜像下载)
 # sentence-transformers>=2
+
+# 星链卫星助手(starlink_live.py): TLE 轨道传播 sgp4(自动带 numpy)
+sgp4>=2.26
+numpy>=1.24

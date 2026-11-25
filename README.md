@@ -2,7 +2,7 @@
 
 一个**本机版多 Agent 编排示例**:**Coordinator / Orchestrator-Workers(Router)模式**。
 
-Hub(协调者)本身是一个由本地 Ollama 驱动的 Agent,它把 10 台「子 Agent」封装成工具。
+Hub(协调者)本身是一个由本地 Ollama 驱动的 Agent,它把 11 台「子 Agent」封装成工具。
 你问一个问题,主 Agent 判断归属哪个领域、调用哪台或哪几台子 Agent,再把结果汇总成
 一份完整回答。所有服务都在本机跑,数据源全部是免费公开 API,**无需任何云服务密钥**
 (LLM 密钥都走环境变量注入)。
@@ -16,7 +16,7 @@ Hub(协调者)本身是一个由本地 Ollama 驱动的 Agent,它把 10 台「�
 │  网页端:子助手卡片 + 在线探测(/agents)+ 异步问答(提交 → 轮询 → 结果)                   │
 └──────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬───────────┘
        │          │          │          │          │          │          │
-   8892 地图    8900 赛事   8901 Comate 8902 股票   8903 直播   8904 天气   8905 NFL ...
+   8892 地图    8900 赛事   8901 Comate 8902 股票   8903 直播   8904 天气   8905 NFL ··· 8914 星链
    (每台子 Agent = 数据层 + 助手层两个脚本,详见下表)
 ```
 
@@ -34,9 +34,10 @@ Hub(协调者)本身是一个由本地 Ollama 驱动的 Agent,它把 10 台「�
 | 8906 | 汽车出口监测 | `auto_agent.py` + `auto_data.py` | UN Comtrade + 行业资讯(盖世汽车/汽车之家) |
 | 8907 | 文档知识库 | `doc_kb_agent.py` + `doc_kb.py` | 本地文档扫描统计 + DashScope embedding RAG |
 | 8908 | 记忆机器人 | `memory_bot.py` | Agently + Ollama,RecordStore 持久记忆 |
+| 8914 | 星链卫星 | `starlink_agent.py` + `starlink_live.py` | CelesTrak 公开 TLE + sgp4 轨道传播(实时星下点分布图) |
 
 > 数据索引/归档目录(`comate_docs_kb/`、`local_docs_kb/`、`bot_memory_data/`、
-> `nfl_news_archive/`、`auto_export_data/` 等)为运行时生成,已在 .gitignore 排除。
+> `nfl_news_archive/`、`auto_export_data/`、`starlink_data/` 等)为运行时生成,已在 .gitignore 排除。
 
 ## 快速开始
 
@@ -53,7 +54,7 @@ python stock_agent.py   --serve --port 8902
 python agents_hub.py --serve              # 打开 http://127.0.0.1:8910
 ```
 
-网页端:顶部显示「子助手在线 x/10」,点击卡片可填该领域示例问题;输入问题点
+网页端:顶部显示「子助手在线 x/11」,点击卡片可填该领域示例问题;输入问题点
 「一键协调」,进度条轮询约 1~3 分钟后给出汇总回答。
 
 ## 命令行用法
@@ -110,7 +111,7 @@ def ask_sports(question: str) -> str:
 
 ## 免责声明
 
-- 数据来源于 Open-Meteo、ESPN、UN Comtrade、新浪财经、雅虎财经、高德地图、盖世汽车、
+- 数据来源于 Open-Meteo、ESPN、UN Comtrade、CelesTrak、新浪财经、雅虎财经、高德地图、盖世汽车、
   汽车之家等**公开接口**,仅供学习交流;请遵守各数据源的服务条款,勿用于商业用途
   或高频抓取。
 - 本仓库不包含任何密钥、账号或内部文档内容;所有 LLM/地图密钥均通过环境变量注入,

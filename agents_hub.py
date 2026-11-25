@@ -220,9 +220,16 @@ def ask_memory_bot(question: str, session_id: str = "hub") -> str:
     return _http_post(8908, "/api/qa", {"question": question, "session_id": session_id})
 
 
+@Agently.tool.action_func
+def ask_starlink(question: str) -> str:
+    """查询 SpaceX 星链卫星实时信息（卫星总数/平均高度/倾角/轨道周期/分布图）。"""
+    return _http_post(8914, "/api/qa", {"question": question})
+
+
 ALL_TOOLS = [
     get_forecast, geocode, ask_comate, ask_stock, ask_sports,
     ask_nfl, detect_live, ask_auto_export, ask_doc_kb, ask_memory_bot,
+    ask_starlink,
 ]
 
 AGENT_SYSTEM = """你是「本地多助手协调中心」。你可以调用以下工具，每个工具对应一台本地 AI 助手
@@ -237,6 +244,7 @@ AGENT_SYSTEM = """你是「本地多助手协调中心」。你可以调用以�
 - ask_auto_export：全球汽车出口数据
 - ask_doc_kb：本地文档库统计与知识检索
 - ask_memory_bot：带持久记忆的本地机器人
+- ask_starlink：SpaceX 星链卫星实时位置与轨道统计
 
 协调规则：
 1. 先判断用户问题属于哪个领域，只调用最贴合的工具，不要调查无关领域；
@@ -262,7 +270,8 @@ _RULES = [
     ("ask_nfl", ["nfl", "橄榄球"]),
     ("detect_live", ["直播", "衣物", "衣服", "带货"]),
     ("ask_auto_export", ["汽车出口", "出口量", "车企"]),
-("ask_doc_kb", ["文档库", "知识库", "本地文档"]),
+    ("ask_doc_kb", ["文档库", "知识库", "本地文档"]),
+    ("ask_starlink", ["星链", "卫星", "spacex", "starlink", "轨道"]),
 ]
 _TOOL_MAP = {
     "get_forecast": get_forecast,
@@ -275,6 +284,7 @@ _TOOL_MAP = {
     "ask_auto_export": ask_auto_export,
     "ask_doc_kb": ask_doc_kb,
     "ask_memory_bot": ask_memory_bot,
+    "ask_starlink": ask_starlink,
 }
 
 
@@ -382,7 +392,8 @@ const EXAMPLES={get_forecast:'北京明天天气怎么样？',geocode:'天安门
  ask_stock:'腾讯股价今天怎么样？',ask_sports:'最近有什么足球比赛？',
  ask_comate:'Comate 的 Agent 模式怎么用？',ask_nfl:'NFL 本周赛程？',
  detect_live:'这件衣服是直播里说的那件吗',ask_auto_export:'中国汽车出口量趋势？',
- ask_doc_kb:'文档库里有多少份文档？',ask_memory_bot:'你还记得我上次说过什么吗？'};
+ ask_doc_kb:'文档库里有多少份文档？',ask_memory_bot:'你还记得我上次说过什么吗？',
+ ask_starlink:'现在有多少颗星链卫星？'};
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function loadAgents(){
   fetch('/agents').then(r=>r.json()).then(d=>{
@@ -655,6 +666,7 @@ AGENT_ROWS = [
     (8906, "汽车出口监测", "ask_auto_export", "全球汽车出口数据与趋势"),
     (8907, "文档知识库", "ask_doc_kb", "本地文档统计与知识检索"),
     (8908, "记忆机器人", "ask_memory_bot", "带持久记忆的对话机器人"),
+    (8914, "星链卫星", "ask_starlink", "SpaceX 星链实时位置与轨道统计"),
 ]
 
 
