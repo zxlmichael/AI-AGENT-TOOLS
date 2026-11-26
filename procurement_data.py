@@ -59,6 +59,20 @@ _REGIONS = ["北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉�
             "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州",
             "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "全国"]
 
+# ccgp 搜索接口地区筛选参数值(全称, 入库 region 简称)
+CCGP_PROVINCES = [
+    ("北京市", "北京"), ("天津市", "天津"), ("河北省", "河北"), ("山西省", "山西"),
+    ("内蒙古自治区", "内蒙古"), ("辽宁省", "辽宁"), ("吉林省", "吉林"), ("黑龙江省", "黑龙江"),
+    ("上海市", "上海"), ("江苏省", "江苏"), ("浙江省", "浙江"), ("安徽省", "安徽"),
+    ("福建省", "福建"), ("江西省", "江西"), ("山东省", "山东"), ("河南省", "河南"),
+    ("湖北省", "湖北"), ("湖南省", "湖南"), ("广东省", "广东"), ("广西壮族自治区", "广西"),
+    ("海南省", "海南"), ("重庆市", "重庆"), ("四川省", "四川"), ("贵州省", "贵州"),
+    ("云南省", "云南"), ("西藏自治区", "西藏"), ("陕西省", "陕西"), ("甘肃省", "甘肃"),
+    ("青海省", "青海"), ("宁夏回族自治区", "宁夏"), ("新疆维吾尔自治区", "新疆"),
+]
+_CCGP_GAP = 3.0        # 省级间礼貌间隔（秒），降低触发 IP 频控的概率
+_CCGP_GROUPS = 4       # 增量轮换组数（每轮一组约 8 省，约 4 天轮完）
+
 _BLOCK_HINTS = ("访问过于频繁", "频繁访问", "请稍后再试", "too many requests", "verify")
 
 SOURCES_META = [
@@ -217,11 +231,12 @@ def _insert(conn: sqlite3.Connection, rec: dict) -> bool:
 CCGP_BID_TYPES = [("1", "招标公告"), ("4", "采购意向")]   # bidType 映射见下（真值以探测为准）
 
 
-def _ccgp_list_url(kw: str, page: int, bid_type: str, start: str, end: str) -> str:
+def _ccgp_list_url(kw: str, page: int, bid_type: str, start: str, end: str,
+                   province: str = "") -> str:
     q = urllib.parse.urlencode({
         "searchtype": "1", "page_index": page, "bidSort": "0", "pinMu": "0",
         "bidType": bid_type, "kw": kw, "start_time": start, "end_time": end,
-        "timeType": "6",
+        "timeType": "6", "province": province,
     })
     return f"https://search.ccgp.gov.cn/bxsearch?{q}"
 
@@ -264,55 +279,86 @@ def _ccgp_parse_detail(text: str, link: str, pub_type: str) -> dict | None:
 
 
 def fetch_ccgp(kw: str = "地图", pages: int = 3, limit_details: int = 40,
-               now_iso: str | None = None) -> tuple[list[dict], list[str]]:
-    """抓 ccgp 搜索结果列表 + 详情。"""
+               now_iso: str | None = None,
+               provinces: list[tuple[str, str]] | None = None) -> tuple[list[dict], list[str]]:
+    """抓 ccgp 搜索结果列表 + 详情。
+
+    provinces=None → 全站检索；[(全称,简称), ...] → 按省滚动检索；
+    单省频控只跳过该省；连续 3 省频控则终止本轮（避免把抓取预算耗在等待上）。
+    """
     now = datetime.now()
     end = now.date().isoformat()
     start = (now - timedelta(days=_WINDOW_DAYS)).date().isoformat()
     items, errors, seen = [], [], set()
-    blocked = False
-    for bid_type, tname in CCGP_BID_TYPES:
-        if blocked:
+    blocked_run = 0
+    scope = list(provinces) if provinces is not None else [("", "")]
+    for prov_full, prov_short in scope:
+        if blocked_run >= 3:
+            errors.append("ccgp: 多省连续频控,本轮提前结束")
             break
-        for page in range(1, pages + 1):
-            try:
-                text = _fetch(_ccgp_list_url(kw, page, bid_type, start, end)).decode("utf-8", "ignore")
-                if _is_blocked(text):
-                    errors.append(f"ccgp: 频控({bid_type} p{page})")
-                    blocked = True
-                    break
-                links = _ccgp_parse_list(text)
-                if not links:
-                    break
-                for link, title in links:
-                    if link in seen:
-                        continue
-                    seen.add(link)
-                    if not match_keywords(title + " " + link):
-                        continue            # 标题不含地图关键词，跳过详情
-                    time.sleep(_DETAIL_GAP)
-                    try:
-                        det = _fetch(link).decode("utf-8", "ignore")
-                        if _is_blocked(det):
-                            errors.append(f"ccgp: 详情频控")
+        for bid_type, tname in CCGP_BID_TYPES:
+            if blocked_run >= 3:
+                break
+            for page in range(1, pages + 1):
+                try:
+                    text = _fetch(_ccgp_list_url(kw, page, bid_type, start, end,
+                                                 prov_full)).decode("utf-8", "ignore")
+                    if _is_blocked(text):
+                        errors.append(f"ccgp: 频控({prov_short or '全站'} {bid_type} p{page})")
+                        blocked_run += 1
+                        break
+                    links = _ccgp_parse_list(text)
+                    if not links:
+                        break
+                    for link, title in links:
+                        if link in seen:
                             continue
-                        rec = _ccgp_parse_detail(det, link, tname)
-                        if rec and match_keywords(rec["title"] + " " + rec["desc"]):
-                            items.append(rec)
-                    except Exception as exc:
-                        errors.append(f"ccgp 详情: {type(exc).__name__}")
-                    if len(items) >= limit_details:
-                        return items, errors
-            except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    break                     # 频道没有该页 → 翻页到底
-                errors.append(f"ccgp {bid_type} p{page}: HTTP{exc.code}")
-                break
-            except Exception as exc:
-                errors.append(f"ccgp {bid_type} p{page}: {type(exc).__name__}")
-                break
-            time.sleep(_FETCH_GAP)
+                        seen.add(link)
+                        if not match_keywords(title + " " + link):
+                            continue            # 标题不含地图关键词，跳过详情
+                        time.sleep(_DETAIL_GAP)
+                        try:
+                            det = _fetch(link).decode("utf-8", "ignore")
+                            if _is_blocked(det):
+                                errors.append("ccgp: 详情频控")
+                                continue
+                            rec = _ccgp_parse_detail(det, link, tname)
+                            if rec and match_keywords(rec["title"] + " " + rec["desc"]):
+                                if prov_short and not rec["region"]:
+                                    rec["region"] = prov_short
+                                items.append(rec)
+                        except Exception as exc:
+                            errors.append(f"ccgp 详情: {type(exc).__name__}")
+                        if len(items) >= limit_details:
+                            return items, errors
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404:
+                        break                     # 频道没有该页 → 翻页到底
+                    errors.append(f"ccgp {prov_short or '全站'} {bid_type} p{page}: HTTP{exc.code}")
+                    break
+                except Exception as exc:
+                    errors.append(f"ccgp {prov_short or '全站'} {bid_type} p{page}: {type(exc).__name__}")
+                    break
+                time.sleep(_FETCH_GAP)
+        time.sleep(_CCGP_GAP if prov_full else 0)
+    if provinces and not items and not any("频控" in e for e in errors):
+        errors.append("ccgp: 省份检索 0 结果且无频控,可能 province 参数未生效,"
+                      "请运行 --probe 验证")
     return items, errors
+
+
+def _ccgp_province_pick() -> list[tuple[str, str]]:
+    """首跑（库空）全 31 省回填；之后按日期交错分 4 组轮换（每轮一组约 8 省），约 4 天轮完。"""
+    conn = _connect()
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+    finally:
+        conn.close()
+    if n == 0:
+        return list(CCGP_PROVINCES)
+    day = int(datetime.now().strftime("%j"))          # 一年中的第几天
+    groups = [CCGP_PROVINCES[i::_CCGP_GROUPS] for i in range(_CCGP_GROUPS)]
+    return groups[day % _CCGP_GROUPS]
 
 
 # ---------- 源适配器：北京公共资源交易 ----------
@@ -458,9 +504,13 @@ def fetch(force: bool = False) -> dict:
         _init_db(conn)
         fetched_at = datetime.now().astimezone().isoformat(timespec="seconds")
         added, errors = 0, []
-        for fetcher in (fetch_ccgp, fetch_beijing):
+        fetchers = [
+            (fetch_ccgp, {"provinces": _ccgp_province_pick()}),
+            (fetch_beijing, {}),
+        ]
+        for fetcher, kwargs in fetchers:
             try:
-                items, errs = fetcher()
+                items, errs = fetcher(**kwargs)
                 errors.extend(errs)
                 for rec in items:
                     rec["first_seen"] = time.time()
@@ -608,12 +658,41 @@ def answer_local(q: str) -> str:
     return "\n".join(lines)
 
 
+def probe_ccgp(provs: list[tuple[str, str]] | None = None) -> str:
+    """验证 ccgp province 参数是否生效：抓代表省份列表页，打印命中/频控状态。"""
+    now = datetime.now()
+    end = now.date().isoformat()
+    start = (now - timedelta(days=_WINDOW_DAYS)).date().isoformat()
+    provs = provs or CCGP_PROVINCES[:5] + CCGP_PROVINCES[-2:]
+    lines = []
+    for prov_full, prov_short in provs:
+        url = _ccgp_list_url("地图", 1, "1", start, end, prov_full)
+        try:
+            text = _fetch(url).decode("utf-8", "ignore")
+            if _is_blocked(text):
+                lines.append(f"{prov_short}: 频控拦截")
+                continue
+            n = len(_ccgp_parse_list(text))
+            lines.append(f"{prov_short}: 列表 {n} 条 {'(可能未按省过滤,值得怀疑)' if n > 30 else ''}")
+        except Exception as exc:
+            lines.append(f"{prov_short}: {type(exc).__name__}")
+        time.sleep(_CCGP_GAP)
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
-    import json
-    meta = fetch(force=True)
-    print(json.dumps(meta, ensure_ascii=False, indent=1))
-    if meta["total"]:
-        print("\n最新 8 条：")
-        for p in projects(limit=8):
-            print(f"  [{p['region'] or '?'}/{p['pub_type'] or '?'}] {p['title'][:46]} "
-                  f"@{p['source']} 预算={p['budget']}")
+    import argparse
+    ap = argparse.ArgumentParser(description="招采地图数据层")
+    ap.add_argument("--probe", action="store_true", help="验证 ccgp province 参数是否生效")
+    args = ap.parse_args()
+    if args.probe:
+        print(probe_ccgp())
+    else:
+        import json
+        meta = fetch(force=True)
+        print(json.dumps(meta, ensure_ascii=False, indent=1))
+        if meta["total"]:
+            print("\n最新 8 条：")
+            for p in projects(limit=8):
+                print(f"  [{p['region'] or '?'}/{p['pub_type'] or '?'}] {p['title'][:46]} "
+                      f"@{p['source']} 预算={p['budget']}")
