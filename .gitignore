@@ -17,3 +17,5 @@ taobao_home_archive/
 sports_reports/
 starlink_data/
 news_assets/
+procurement_assets/
+procurement_data/*.db

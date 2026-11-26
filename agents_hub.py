@@ -232,10 +232,19 @@ def ask_news(question: str) -> str:
     return _http_post(8915, "/api/qa", {"question": question})
 
 
+@Agently.tool.action_func
+def ask_procurement(question: str) -> str:
+    """查询政府招采网近 30 天地图需求招标/采购意向项目（地区/类型/预算/趋势，含问答与导出）。
+
+    深挖类问题（趋势/分析）会自动升级 OpenManus，可能耗时 1-4 分钟。
+    """
+    return _http_post(8916, "/api/qa", {"question": question}, timeout=300)
+
+
 ALL_TOOLS = [
     get_forecast, geocode, ask_comate, ask_stock, ask_sports,
     ask_nfl, detect_live, ask_auto_export, ask_doc_kb, ask_memory_bot,
-    ask_starlink, ask_news,
+    ask_starlink, ask_news, ask_procurement,
 ]
 
 AGENT_SYSTEM = """你是「本地多助手协调中心」。你可以调用以下工具，每个工具对应一台本地 AI 助手
@@ -252,6 +261,7 @@ AGENT_SYSTEM = """你是「本地多助手协调中心」。你可以调用以�
 - ask_memory_bot：带持久记忆的本地机器人
 - ask_starlink：SpaceX 星链卫星实时位置与轨道统计
 - ask_news：国内外时事新闻总结与要点（国内/国际/科技/财经）
+- ask_procurement：政府招采网地图需求监测（招标/采购意向项目、趋势问答）
 
 协调规则：
 1. 先判断用户问题属于哪个领域，只调用最贴合的工具，不要调查无关领域；
@@ -260,7 +270,9 @@ AGENT_SYSTEM = """你是「本地多助手协调中心」。你可以调用以�
 4. 转述时间信息时严格沿用工具返回的「日期 + 星期」，不要自行改写指代
    （例如工具标"今天=11-19，明天=11-20"，用户问"明天天气"就必须报 11-20 的数据）；
 5. 与所有领域都无关的问题（闲聊等），直接说明你能协调哪些助手，不要调用工具；
-6. 中文回答。"""
+6. 涉及「招标/采购/招采/投标」的政府项目（如"地图需求项目"）一律用 ask_procurement；
+   只有问地点坐标/路线（如"天安门在哪"）才用 geocode，即使问题里含"地图"二字；
+7. 中文回答。"""
 
 
 # ---------------------------------------------------------------- 规则路由（降级路径）
@@ -280,6 +292,7 @@ _RULES = [
     ("ask_doc_kb", ["文档库", "知识库", "本地文档"]),
     ("ask_starlink", ["星链", "卫星", "spacex", "starlink", "轨道"]),
     ("ask_news", ["新闻", "时事", "要闻", "头条", "大事"]),
+    ("ask_procurement", ["招采", "招标", "采购", "投标", "中标"]),
 ]
 _TOOL_MAP = {
     "get_forecast": get_forecast,
@@ -294,15 +307,21 @@ _TOOL_MAP = {
     "ask_memory_bot": ask_memory_bot,
     "ask_starlink": ask_starlink,
     "ask_news": ask_news,
+    "ask_procurement": ask_procurement,
 }
 
 
 def route_by_rules(question: str) -> str:
     """关键词规则路由：命中哪个领域就直调哪个子助手（无 LLM 参与，秒回）。"""
     hits = [name for name, kws in _RULES if any(kw in question for kw in kws)]
+    # 招采类问题里出现"地图"仍属招采领域，不要让 geocode 抢答
+    if "ask_procurement" in hits and "geocode" in hits and \
+            any(k in question for k in dict(_RULES)["ask_procurement"]):
+        hits.remove("geocode")
     if not hits:
         return ("规则路由未匹配到任何助手领域。可用领域：天气 / 地图 / 股票 / Comate / "
-                "体育赛事 / NFL / 直播衣物识别 / 汽车出口 / 文档库 / 记忆机器人。")
+                "体育赛事 / NFL / 直播衣物识别 / 汽车出口 / 文档库 / 记忆机器人 / "
+                "星链 / 时事新闻 / 招采地图监测。")
     parts = []
     for name in hits:
         fn = _TOOL_MAP[name]
@@ -403,7 +422,8 @@ const EXAMPLES={get_forecast:'北京明天天气怎么样？',geocode:'天安门
  detect_live:'这件衣服是直播里说的那件吗',ask_auto_export:'中国汽车出口量趋势？',
  ask_doc_kb:'文档库里有多少份文档？',ask_memory_bot:'你还记得我上次说过什么吗？',
  ask_starlink:'现在有多少颗星链卫星？',
-  ask_news:'总结一下最近的国内外大事'};
+  ask_news:'总结一下最近的国内外大事',
+  ask_procurement:'最近政府招采有哪些地图需求项目？'};
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function loadAgents(){
   fetch('/agents').then(r=>r.json()).then(d=>{
@@ -678,6 +698,7 @@ AGENT_ROWS = [
     (8908, "记忆机器人", "ask_memory_bot", "带持久记忆的对话机器人"),
     (8914, "星链卫星", "ask_starlink", "SpaceX 星链实时位置与轨道统计"),
     (8915, "时事新闻", "ask_news", "国内外新闻总结与要点(可视化)"),
+    (8916, "招采地图监测", "ask_procurement", "政府招采地图需求项目与问答(可视化)"),
 ]
 
 
