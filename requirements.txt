@@ -11,3 +11,6 @@ openai>=1
 # 星链卫星助手(starlink_live.py): TLE 轨道传播 sgp4(自动带 numpy)
 sgp4>=2.26
 numpy>=1.24
+
+# 时事新闻助手(news_data.py): 中文分词提取热搜词
+jieba>=0.42
